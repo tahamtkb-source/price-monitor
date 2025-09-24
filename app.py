@@ -1,87 +1,83 @@
+from flask import Flask, jsonify
 import sqlite3
-import requests
-from bs4 import BeautifulSoup
-from flask import Flask, jsonify, render_template_string
+import random
+
+app = Flask(__name__)
+
+DB_FILE = "prices.db"
+
 
 # =======================
 # Database Setup
 # =======================
 def init_db():
-    conn = sqlite3.connect("prices.db")
-    cur = conn.cursor()
-    # SKU mapping table
-    cur.execute('''
-        CREATE TABLE IF NOT EXISTS sku_map (
-            sku TEXT PRIMARY KEY,
-            canonical_name TEXT
-        )
-    ''')
-    # Prices table
-    cur.execute('''
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("""
         CREATE TABLE IF NOT EXISTS prices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sku TEXT,
-            canonical_name TEXT,
+            product TEXT,
+            brand TEXT,
             source TEXT,
             price REAL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
-    ''')
+    """)
     conn.commit()
     conn.close()
 
 
 # =======================
-# Flask App
+# Scraping Function
 # =======================
-app = Flask(__name__)
-init_db()   # ✅ make sure DB is ready
-
-
-# =======================
-# Helpers
-# =======================
-def save_price(sku, canonical_name, source, price):
-    conn = sqlite3.connect("prices.db")
-    cur = conn.cursor()
-    cur.execute('''
-        INSERT INTO prices (sku, canonical_name, source, price)
-        VALUES (?, ?, ?, ?)
-    ''', (sku, canonical_name, source, price))
-    conn.commit()
-    conn.close()
-
-
 def scrape_jumia(product_name):
-    """Simple scraper for Jumia search results"""
-    url = f"https://www.jumia.co.ke/catalog/?q={product_name.replace(' ', '+')}"
-    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-    soup = BeautifulSoup(resp.text, "html.parser")
-    price_tag = soup.select_one("div.prc")
-    if price_tag:
-        price_text = price_tag.get_text().replace("KSh", "").replace(",", "").strip()
-        try:
-            return float(price_text)
-        except:
-            return None
-    return None
+    """
+    Dummy scraper function – replace with real scraping logic later.
+    For now, it returns a fake price for testing.
+    """
+    try:
+        return round(random.uniform(1000, 5000), 2)
+    except Exception as e:
+        print(f"Scrape error for {product_name}: {e}")
+        return None
 
 
-def compute_aggregates(days=7):
-    conn = sqlite3.connect("prices.db")
-    cur = conn.cursor()
-    cur.execute('''
-        SELECT canonical_name, source, AVG(price), COUNT(*)
-        FROM prices
-        WHERE timestamp >= datetime('now', ?)
-        GROUP BY canonical_name, source
-    ''', (f'-{days} days',))
-    rows = cur.fetchall()
+# =======================
+# Save Price to Database
+# =======================
+def save_price(product, brand, source, price):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO prices (product, brand, source, price) VALUES (?, ?, ?, ?)",
+        (product, brand, source, price)
+    )
+    conn.commit()
     conn.close()
-    return [
-        {"product": r[0], "source": r[1], "avg_price": r[2], "samples": r[3]}
-        for r in rows
-    ]
+
+
+# =======================
+# Aggregates (No pandas)
+# =======================
+def compute_aggregates():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT product, MIN(price), MAX(price), AVG(price) FROM prices GROUP BY product")
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"message": "No data yet"}
+
+    result = {}
+    for row in rows:
+        product, min_p, max_p, avg_p = row
+        result[product] = {
+            "min_price": min_p,
+            "max_price": max_p,
+            "avg_price": round(avg_p, 2),
+        }
+    return result
 
 
 # =======================
@@ -89,17 +85,31 @@ def compute_aggregates(days=7):
 # =======================
 @app.route("/")
 def home():
-    return render_template_string("""
-    <h2>🛠 Kenya Hardware Price Monitor</h2>
-    <p><a href='/run_scrape'>Run Scraper</a></p>
-    <p><a href='/api/aggregates'>View Aggregates (JSON)</a></p>
-    """)
+    return jsonify({"message": "Welcome to the Price Scraper API"})
 
 
 @app.route("/run_scrape")
 def run_scrape_endpoint():
     test_products = ["hammer", "cement", "drill machine"]
     results = []
+
     for prod in test_products:
         price = scrape_jumia(prod)
-        if
+        if price:  # ✅ clean syntax
+            save_price(prod, prod.title(), "Jumia", price)
+            results.append({"product": prod, "price": price})
+
+    return jsonify({"scraped": results})
+
+
+@app.route("/api/aggregates")
+def api_aggregates():
+    return jsonify(compute_aggregates())
+
+
+# =======================
+# Main Entry
+# =======================
+if __name__ == "__main__":
+    init_db()
+    app.run(host="0.0.0.0", port=10000)
