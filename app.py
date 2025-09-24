@@ -1,5 +1,4 @@
 import sqlite3
-import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, jsonify, render_template_string
@@ -103,19 +102,4 @@ def run_scrape_endpoint():
     results = []
     for prod in test_products:
         price = scrape_jumia(prod)
-        if price:
-            save_price(prod, prod.title(), "Jumia", price)
-            results.append({"product": prod, "price": price})
-    return jsonify({"scraped": results})
-
-
-@app.route("/api/aggregates")
-def api_aggregates():
-    return jsonify(compute_aggregates())
-
-
-# =======================
-# Main Entry
-# =======================
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+        if
